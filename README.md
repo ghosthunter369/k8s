@@ -977,3 +977,455 @@ No resources found in dev namespace.
 pod/nginx-64777cd554-w9kkk labeled
 ```
 
+## Deployment
+
+在kubernetes中，Pod是最小的控制单元，但是kubernetes很少直接控制Pod，一般都是通过Pod控制器来完成的。Pod控制器用于pod的管理，确保pod资源符合预期的状态，当pod的资源出现故障时，会尝试进行重启或重建pod。
+
+ 在kubernetes中Pod控制器的种类有很多，本章节只介绍一种：Deployment。
+
+![image-20200408193950807](https://github.com/ghosthunter369/k8s/raw/master/d1/%E8%AE%B2%E4%B9%89(md%E7%89%88)/assets/image-20200408193950807.png)
+
+命令
+
+```shell
+# 命令格式: kubectl run deployment名称  [参数] 
+# --image  指定pod的镜像
+# --port   指定端口
+# --replicas  指定创建pod数量
+# --namespace  指定namespace
+[root@master ~]# kubectl run nginx --image=nginx:1.17.1 --port=80 --replicas=3 -n dev
+deployment.apps/nginx created
+
+# 查看创建的Pod
+[root@master ~]# kubectl get pods -n dev
+NAME                     READY   STATUS    RESTARTS   AGE
+nginx-5ff7956ff6-6k8cb   1/1     Running   0          19s
+nginx-5ff7956ff6-jxfjt   1/1     Running   0          19s
+nginx-5ff7956ff6-v6jqw   1/1     Running   0          19s
+
+# 查看deployment的信息
+[root@master ~]# kubectl get deploy -n dev
+NAME    READY   UP-TO-DATE   AVAILABLE   AGE
+nginx   3/3     3            3           2m42s
+
+# UP-TO-DATE：成功升级的副本数量
+# AVAILABLE：可用副本的数量
+[root@master ~]# kubectl get deploy -n dev -o wide
+NAME    READY UP-TO-DATE  AVAILABLE   AGE     CONTAINERS   IMAGES              SELECTOR
+nginx   3/3     3         3           2m51s   nginx        nginx:1.17.1        run=nginx
+
+# 查看deployment的详细信息
+[root@master ~]# kubectl describe deploy nginx -n dev
+Name:                   nginx
+Namespace:              dev
+CreationTimestamp:      Wed, 08 Apr 2020 11:14:14 +0800
+Labels:                 run=nginx
+Annotations:            deployment.kubernetes.io/revision: 1
+Selector:               run=nginx
+Replicas:               3 desired | 3 updated | 3 total | 3 available | 0 unavailable
+StrategyType:           RollingUpdate
+MinReadySeconds:        0
+RollingUpdateStrategy:  25% max unavailable, 25% max surge
+Pod Template:
+  Labels:  run=nginx
+  Containers:
+   nginx:
+    Image:        nginx:1.17.1
+    Port:         80/TCP
+    Host Port:    0/TCP
+    Environment:  <none>
+    Mounts:       <none>
+  Volumes:        <none>
+Conditions:
+  Type           Status  Reason
+  ----           ------  ------
+  Available      True    MinimumReplicasAvailable
+  Progressing    True    NewReplicaSetAvailable
+OldReplicaSets:  <none>
+NewReplicaSet:   nginx-5ff7956ff6 (3/3 replicas created)
+Events:
+  Type    Reason             Age    From                   Message
+  ----    ------             ----   ----                   -------
+  Normal  ScalingReplicaSet  5m43s  deployment-controller  Scaled up replicaset nginx-5ff7956ff6 to 3
+  
+# 删除 
+[root@master ~]# kubectl delete deploy nginx -n dev
+deployment.apps "nginx" deleted
+```
+
+
+
+**配置操作**
+
+创建一个deploy-nginx.yaml，内容如下：
+
+```shell
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+  namespace: dev
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      run: nginx
+  template:
+    metadata:
+      labels:
+        run: nginx
+    spec:
+      containers:
+      - image: nginx:1.17.1
+        name: nginx
+        ports:
+        - containerPort: 80
+          protocol: TCP
+```
+
+然后就可以执行对应的创建和删除命令了：
+
+ 创建：kubectl create -f deploy-nginx.yaml
+
+ 删除：kubectl delete -f deploy-nginx.yaml
+
+
+
+##  Service
+
+通过上节课的学习，已经能够利用Deployment来创建一组Pod来提供具有高可用性的服务。
+
+虽然每个Pod都会分配一个单独的Pod IP，然而却存在如下两问题：
+
+- Pod IP 会随着Pod的重建产生变化
+- Pod IP 仅仅是集群内可见的虚拟IP，外部无法访问
+
+这样对于访问这个服务带来了难度。因此，kubernetes设计了Service来解决这个问题。
+
+Service可以看作是一组同类Pod**对外的访问接口**。借助Service，应用可以方便地实现服务发现和负载均衡。
+
+![image-20200408194716912](https://gitee.com/stefanie-sun-fans/k8s/raw/master/d1/%E8%AE%B2%E4%B9%89(md%E7%89%88)/assets/image-20200408194716912.png)
+
+**操作一：创建集群内部可访问的Service**
+
+先根据之前的deploy-nginx.yaml创建出三个pod，
+
+```shell
+ kubectl expose deploy nginx --name=svc-nginx1 --type=ClusterIP --port=80 --target-port=80 -n dev
+```
+
+**操作二：创建集群外部也可访问的Service**
+
+```shell
+[root@master ~]# kubectl expose deploy nginx --name=svc-nginx2 --type=NodePort --port=80 --target-port=80 -n dev
+service/svc-nginx2 exposed
+[root@master ~]# kubectl get svc  svc-nginx2  -n dev -o wide
+NAME         TYPE       CLUSTER-IP    EXTERNAL-IP   PORT(S)        AGE   SELECTOR
+svc-nginx2   NodePort   10.97.75.21   <none>        80:32499/TCP   36s   run=nginx
+[root@master ~]# 
+访问192.168.101.100:32499即可
+```
+
+**删除Service**
+
+```shell
+[root@master ~]# kubectl delete svc svc-nginx1 -n dev                       
+service "svc-nginx1" deleted
+[root@master ~]# kubectl delete svc svc-nginx2 -n dev                       
+service "svc-nginx2" deleted
+[root@master ~]# 
+```
+
+
+
+**配置方式**
+
+创建一个svc-nginx.yaml，内容如下：
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc-nginx
+  namespace: dev
+spec:
+  clusterIP: 10.109.179.231
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    run: nginx
+  type: ClusterIP
+```
+
+然后就可以执行对应的创建和删除命令了：
+
+ 创建：kubectl create -f svc-nginx.yaml
+
+ 删除：kubectl delete -f svc-nginx.yaml
+
+#  第五章 Pod详解
+
+本章节将详细介绍Pod资源的各种配置（yaml）和原理。
+
+## Pod介绍
+
+### Pod结构
+
+![image-20200407121501907](https://gitee.com/stefanie-sun-fans/k8s/raw/master/d1/%E8%AE%B2%E4%B9%89(md%E7%89%88)/assets/image-20200407121501907.png)
+
+每个Pod中都可以包含一个或者多个容器，这些容器可以分为两类：
+
+- 用户程序所在的容器，数量可多可少
+
+- Pause容器，这是每个Pod都会有的一个**根容器**，它的作用有两个：
+
+  - 可以以它为依据，评估整个Pod的健康状态
+  - 可以在根容器上设置Ip地址，其它容器都此Ip（Pod IP），以实现Pod内部的网路通信
+
+  ```
+  这里是Pod内部的通讯，Pod的之间的通讯采用虚拟二层网络技术来实现，我们当前环境用的是Flannel
+  ```
+
+###  Pod定义
+
+下面是Pod的资源清单：
+
+```yaml
+apiVersion: v1     #必选，版本号，例如v1
+kind: Pod       　 #必选，资源类型，例如 Pod
+metadata:       　 #必选，元数据
+  name: string     #必选，Pod名称
+  namespace: string  #Pod所属的命名空间,默认为"default"
+  labels:       　　  #自定义标签列表
+    - name: string      　          
+spec:  #必选，Pod中容器的详细定义
+  containers:  #必选，Pod中容器列表
+  - name: string   #必选，容器名称
+    image: string  #必选，容器的镜像名称
+    imagePullPolicy: [ Always|Never|IfNotPresent ]  #获取镜像的策略 
+    command: [string]   #容器的启动命令列表，如不指定，使用打包时使用的启动命令
+    args: [string]      #容器的启动命令参数列表
+    workingDir: string  #容器的工作目录
+    volumeMounts:       #挂载到容器内部的存储卷配置
+    - name: string      #引用pod定义的共享存储卷的名称，需用volumes[]部分定义的的卷名
+      mountPath: string #存储卷在容器内mount的绝对路径，应少于512字符
+      readOnly: boolean #是否为只读模式
+    ports: #需要暴露的端口库号列表
+    - name: string        #端口的名称
+      containerPort: int  #容器需要监听的端口号
+      hostPort: int       #容器所在主机需要监听的端口号，默认与Container相同
+      protocol: string    #端口协议，支持TCP和UDP，默认TCP
+    env:   #容器运行前需设置的环境变量列表
+    - name: string  #环境变量名称
+      value: string #环境变量的值
+    resources: #资源限制和请求的设置
+      limits:  #资源限制的设置
+        cpu: string     #Cpu的限制，单位为core数，将用于docker run --cpu-shares参数
+        memory: string  #内存限制，单位可以为Mib/Gib，将用于docker run --memory参数
+      requests: #资源请求的设置
+        cpu: string    #Cpu请求，容器启动的初始可用数量
+        memory: string #内存请求,容器启动的初始可用数量
+    lifecycle: #生命周期钩子
+		postStart: #容器启动后立即执行此钩子,如果执行失败,会根据重启策略进行重启
+		preStop: #容器终止前执行此钩子,无论结果如何,容器都会终止
+    livenessProbe:  #对Pod内各容器健康检查的设置，当探测无响应几次后将自动重启该容器
+      exec:       　 #对Pod容器内检查方式设置为exec方式
+        command: [string]  #exec方式需要制定的命令或脚本
+      httpGet:       #对Pod内个容器健康检查方法设置为HttpGet，需要制定Path、port
+        path: string
+        port: number
+        host: string
+        scheme: string
+        HttpHeaders:
+        - name: string
+          value: string
+      tcpSocket:     #对Pod内个容器健康检查方式设置为tcpSocket方式
+         port: number
+       initialDelaySeconds: 0       #容器启动完成后首次探测的时间，单位为秒
+       timeoutSeconds: 0    　　    #对容器健康检查探测等待响应的超时时间，单位秒，默认1秒
+       periodSeconds: 0     　　    #对容器监控检查的定期探测时间设置，单位秒，默认10秒一次
+       successThreshold: 0
+       failureThreshold: 0
+       securityContext:
+         privileged: false
+  restartPolicy: [Always | Never | OnFailure]  #Pod的重启策略
+  nodeName: <string> #设置NodeName表示将该Pod调度到指定到名称的node节点上
+  nodeSelector: obeject #设置NodeSelector表示将该Pod调度到包含这个label的node上
+  imagePullSecrets: #Pull镜像时使用的secret名称，以key：secretkey格式指定
+  - name: string
+  hostNetwork: false   #是否使用主机网络模式，默认为false，如果设置为true，表示使用宿主机网络
+  volumes:   #在该pod上定义共享存储卷列表
+  - name: string    #共享存储卷名称 （volumes类型有很多种）
+    emptyDir: {}       #类型为emtyDir的存储卷，与Pod同生命周期的一个临时目录。为空值
+    hostPath: string   #类型为hostPath的存储卷，表示挂载Pod所在宿主机的目录
+      path: string      　　        #Pod所在宿主机的目录，将被用于同期中mount的目录
+    secret:       　　　#类型为secret的存储卷，挂载集群与定义的secret对象到容器内部
+      scretname: string  
+      items:     
+      - key: string
+        path: string
+    configMap:         #类型为configMap的存储卷，挂载预定义的configMap对象到容器内部
+      name: string
+      items:
+      - key: string
+        path: string
+```
+
+```yaml
+#小提示：
+#	在这里，可通过一个命令来查看每种资源的可配置项
+#   kubectl explain 资源类型         查看某种资源可以配置的一级属性
+#	kubectl explain 资源类型.属性     查看属性的子属性
+[root@master ~]# kubectl explain pod
+KIND:     Pod
+VERSION:  v1
+FIELDS:
+   apiVersion   <string>
+   kind <string>
+   metadata     <Object>
+   spec <Object>
+   status       <Object>
+
+[root@master ~]# kubectl explain pod.metadata
+KIND:     Pod
+VERSION:  v1
+RESOURCE: metadata <Object>
+FIELDS:
+   annotations  <map[string]string>
+   clusterName  <string>
+   creationTimestamp    <string>
+   deletionGracePeriodSeconds   <integer>
+   deletionTimestamp    <string>
+   finalizers   <[]string>
+   generateName <string>
+   generation   <integer>
+   labels       <map[string]string>
+   managedFields        <[]Object>
+   name <string>
+   namespace    <string>
+   ownerReferences      <[]Object>
+   resourceVersion      <string>
+   selfLink     <string>
+   uid  <string>
+```
+
+在kubernetes中基本所有资源的一级属性都是一样的，主要包含5部分：
+
+- apiVersion <string> 版本，由kubernetes内部定义，版本号必须可以用 kubectl api-versions 查询到
+- kind <string> 类型，由kubernetes内部定义，版本号必须可以用 kubectl api-resources 查询到
+- metadata <Object> 元数据，主要是资源标识和说明，常用的有name、namespace、labels等
+- spec <Object> 描述，这是配置中最重要的一部分，里面是对各种资源配置的详细描述
+- status <Object> 状态信息，里面的内容不需要定义，由kubernetes自动生成
+
+在上面的属性中，spec是接下来研究的重点，继续看下它的常见子属性:
+
+- containers <[]Object> 容器列表，用于定义容器的详细信息
+- nodeName <String> 根据nodeName的值将pod调度到指定的Node节点上
+- nodeSelector <map[]> 根据NodeSelector中定义的信息选择将该Pod调度到包含这些label的Node 上
+- hostNetwork <boolean> 是否使用主机网络模式，默认为false，如果设置为true，表示使用宿主机网络
+- volumes <[]Object> 存储卷，用于定义Pod上面挂在的存储信息
+- restartPolicy <string> 重启策略，表示Pod在遇到故障的时候的处理策略
+
+###  基本配置
+
+创建pod-base.yaml文件，内容如下：
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-base
+  namespace: dev
+  labels:
+    user: heima
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.17.1
+  - name: busybox
+    image: busybox:1.30
+```
+
+上面定义了一个比较简单Pod的配置，里面有两个容器：
+
+- nginx：用1.17.1版本的nginx镜像创建，（nginx是一个轻量级web容器）
+- busybox：用1.30版本的busybox镜像创建，（busybox是一个小巧的linux命令集合）
+
+```shell
+# 创建Pod
+[root@master pod]# kubectl apply -f pod-base.yaml
+pod/pod-base created
+
+# 查看Pod状况
+# READY 1/2 : 表示当前Pod中有2个容器，其中1个准备就绪，1个未就绪
+# RESTARTS  : 重启次数，因为有1个容器故障了，Pod一直在重启试图恢复它
+[root@master pod]# kubectl get pod -n dev
+NAME       READY   STATUS    RESTARTS   AGE
+pod-base   1/2     Running   4          95s
+
+# 可以通过describe查看内部的详情
+# 此时已经运行起来了一个基本的Pod，虽然它暂时有问题
+[root@master pod]# kubectl describe pod pod-base -n dev
+```
+
+### 启动命令
+
+ 在前面的案例中，一直有一个问题没有解决，就是的busybox容器一直没有成功运行，那么到底是什么原因导致这个容器的故障呢？
+
+ 原来busybox并不是一个程序，而是类似于一个工具类的集合，kubernetes集群启动管理后，它会自动关闭。解决方法就是让其一直在运行，这就用到了command配置。
+
+创建pod-command.yaml文件，内容如下：
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-command
+  namespace: dev
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.17.1
+  - name: busybox
+    image: busybox:1.30
+    command: ["/bin/sh","-c","touch /tmp/hello.txt;while true;do /bin/echo $(date +%T) >> /tmp/hello.txt; sleep 3; done;"]
+```
+
+```shell
+[root@master ~]# vim pod-command.yaml
+[root@master ~]# kubectl apply -f pod-command.yaml 
+pod/pod-command created
+[root@master ~]# kubectl get pod -n dev
+NAME          READY   STATUS              RESTARTS   AGE
+pod-base      1/2     CrashLoopBackOff    7          12m
+pod-command   0/2     ContainerCreating   0          15s
+[root@master ~]# kubectl get pod -n dev
+NAME          READY   STATUS             RESTARTS   AGE
+pod-base      1/2     CrashLoopBackOff   7          14m
+pod-command   2/2     Running            0          106s
+[root@master ~]# kubectl exec pod pod-command -n dev -it  -c busybox /bin/sh
+Error from server (NotFound): pods "pod" not found
+[root@master ~]# kubectl exec pod-command -n dev -it  -c busybox /bin/sh
+/ # ls
+bin   dev   etc   home  proc  root  sys   tmp   usr   var
+/ # tail -f /tmp/hello.txt
+13:14:43
+13:14:46
+13:14:49
+13:14:52
+13:14:55
+13:14:58
+13:15:01
+13:15:04
+13:15:07
+13:15:10
+13:15:13
+^C
+/ # exit
+command terminated with exit code 130
+[root@master ~]# 
+
+```
+
